@@ -27,5 +27,5 @@ jobs:
     - id: 'upload-folder'
       uses: 'google-github-actions/upload-cloud-storage@v2'
       with:
-        path: './'
-        destination: 'oldschool-sdk'
+        path: './models'
+        destination: 'oldschool-sdk/models'
