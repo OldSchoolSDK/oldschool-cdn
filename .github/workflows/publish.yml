@@ -1,37 +1,50 @@
-name: GCP Bucket Publish
+name: Publish to Cloudflare R2
 
 on:
   workflow_dispatch:
-    
+
   push:
-    branches: [ $default-branch ]
-  pull_request:
-    branches: [ $default-branch ]
+    branches: [ master ]
+
+env:
+  # R2 bucket name.
+  BUCKET: oldschool-cdn
+  # R2 is S3-compatible; region is always "auto".
+  AWS_DEFAULT_REGION: auto
+  AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+  AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+  # Account-scoped S3 endpoint: https://<ACCOUNT_ID>.r2.cloudflarestorage.com
+  R2_ENDPOINT: https://${{ secrets.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com
+
 jobs:
   publish:
     runs-on: ubuntu-latest
-    permissions:
-      contents: 'read'
-      id-token: 'write'
 
     steps:
-    - id: 'checkout'
-      uses: 'actions/checkout@v4'
+      - id: checkout
+        uses: actions/checkout@v4
 
-    - id: 'auth'
-      uses: 'google-github-actions/auth@v2'
-      with:
-        credentials_json: '${{ secrets.GOOGLE_CREDENTIALS }}'
-        service_account: 'my-service-account@my-project.iam.gserviceaccount.com'
+      # Apply the CORS policy from cors.json so the authorized-origins list
+      # lives in git and is reasserted on every publish (idempotent).
+      - name: Apply CORS policy
+        run: |
+          aws s3api put-bucket-cors \
+            --bucket "$BUCKET" \
+            --cors-configuration file://cors.json \
+            --endpoint-url "$R2_ENDPOINT"
 
-    - id: 'upload-models-folder'
-      uses: 'google-github-actions/upload-cloud-storage@v2'
-      with:
-        path: './models'
-        destination: 'oldschool-sdk'
+      # Mirror ./models -> s3://oldschool-cdn/models (keys match the old layout).
+      - name: Sync models
+        run: |
+          aws s3 sync ./models "s3://$BUCKET/models" \
+            --endpoint-url "$R2_ENDPOINT" \
+            --delete \
+            --cache-control "public, max-age=3600"
 
-    - id: 'upload-assets-folder'
-      uses: 'google-github-actions/upload-cloud-storage@v2'
-      with:
-        path: './assets'
-        destination: 'oldschool-sdk'
+      # Mirror ./assets -> s3://oldschool-cdn/assets.
+      - name: Sync assets
+        run: |
+          aws s3 sync ./assets "s3://$BUCKET/assets" \
+            --endpoint-url "$R2_ENDPOINT" \
+            --delete \
+            --cache-control "public, max-age=3600"
